@@ -57,8 +57,12 @@ def detect_feature_columns(df):
     return mode_cols, vib_cols
 
 
-def train_norm_models(train_df, mode_cols, vib_cols, n_clusters=4):
+def train_norm_models(train_df, mode_cols, vib_cols, n_clusters=4, max_train_rows=20000):
     train_df = train_df.dropna(subset=mode_cols + vib_cols).copy()
+    if len(train_df) > max_train_rows:
+        step = int(np.ceil(len(train_df) / max_train_rows))
+        step = max(step, 1)
+        train_df = train_df.iloc[::step].copy()
     if len(train_df) < max(200, len(mode_cols) * 10):
         raise ValueError("Слишком мало строк в обучающей выборке после очистки.")
 
@@ -219,19 +223,58 @@ def main():
 
     train_df = data[data["source"] == train_source].copy()
 
-    with st.spinner("Обучение модели нормы по обучающей выборке..."):
-        try:
-            model_bundle = train_norm_models(
-                train_df, mode_cols, vib_cols, n_clusters=n_clusters
-            )
-        except ValueError as exc:
-            st.error(f"Ошибка при обучении модели: {exc}")
-            return
+    st.markdown("### Обучение модели и расчёт индекса")
+    st.write(
+        "Нажмите кнопку ниже, чтобы обучить модель на выбранной обучающей выборке "
+        "и рассчитать индекс состояния для всех загруженных данных. "
+        "При изменении только порогов или интервала времени пересчёт не требуется."
+    )
 
-    with st.spinner("Расчёт индекса состояния по всем данным..."):
-        result_df = compute_health_index(
-            data, model_bundle, smooth_window=smooth_window
+    run_calc = st.button("Обучить модель и рассчитать индекс", type="primary")
+
+    data_hash = hash(
+        (
+            len(data),
+            tuple(sorted(data["source"].unique().tolist())),
+            str(data["Дата и время"].min()),
+            str(data["Дата и время"].max()),
         )
+    )
+    current_params = {
+        "train_source": train_source,
+        "n_clusters": n_clusters,
+        "smooth_window": smooth_window,
+        "data_hash": data_hash,
+    }
+
+    need_recalc = (
+        "result_df" not in st.session_state
+        or "calc_params" not in st.session_state
+        or st.session_state["calc_params"] != current_params
+    )
+
+    if run_calc or need_recalc:
+        with st.spinner("Обучение модели нормы по обучающей выборке..."):
+            try:
+                model_bundle = train_norm_models(
+                    train_df, mode_cols, vib_cols, n_clusters=n_clusters
+                )
+            except ValueError as exc:
+                st.error(f"Ошибка при обучении модели: {exc}")
+                return
+
+        with st.spinner("Расчёт индекса состояния по всем данным..."):
+            result_df = compute_health_index(
+                data, model_bundle, smooth_window=smooth_window
+            )
+
+        st.session_state["result_df"] = result_df
+        st.session_state["calc_params"] = current_params
+    else:
+        result_df = st.session_state.get("result_df")
+        if result_df is None:
+            st.info("Нажмите кнопку выше для первого запуска расчёта.")
+            return
 
     min_ts = result_df["Дата и время"].min()
     max_ts = result_df["Дата и время"].max()
