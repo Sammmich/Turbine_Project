@@ -24,6 +24,14 @@ VIB_COL_CANDIDATES = [
 ]
 
 
+def downsample_for_plot(df, max_points=2000):
+    if len(df) <= max_points:
+        return df
+    step = int(np.ceil(len(df) / max_points))
+    step = max(step, 1)
+    return df.iloc[::step].copy()
+
+
 def load_csv_files(uploaded_files):
     frames = []
     for file in uploaded_files:
@@ -169,6 +177,13 @@ def main():
         smooth_window = st.slider(
             "Окно сглаживания индекса, точек", min_value=10, max_value=240, value=60, step=10
         )
+        max_points = st.slider(
+            "Максимальное число точек на графике",
+            min_value=500,
+            max_value=5000,
+            value=2000,
+            step=500,
+        )
         warn_threshold = st.slider(
             "Предупредительный порог H", min_value=0.0, max_value=1.0, value=0.7, step=0.05
         )
@@ -300,7 +315,12 @@ def main():
     )
     view_df = result_df.loc[mask].set_index("Дата и время")
 
+    if view_df.empty:
+        st.info("На выбранном интервале нет данных для отображения.")
+        return
+
     plot_df = view_df[["H_smooth"]].copy()
+    plot_df = downsample_for_plot(plot_df, max_points=max_points)
     plot_df["Порог (предупр.)"] = warn_threshold
     plot_df["Порог (авар.)"] = alarm_threshold
 
